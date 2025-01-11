@@ -1,0 +1,50 @@
+<script>
+  let ws;
+
+  function connect() {
+    const clientId = document.getElementById("clientIdInput").value;
+    // WebSocket-URL ggf. mit clientId als Query:
+    ws = new WebSocket(`ws://localhost:8080/ws?client_id=${clientId}`);
+
+    ws.onopen = function() {
+      console.log("Connected");
+      // Optional erste Nachricht senden
+      const initMsg = {
+        message_type: "init",
+        client_id: clientId
+      };
+      ws.send(JSON.stringify(initMsg));
+    };
+
+    ws.onmessage = function(event) {
+      const data = JSON.parse(event.data);
+      if (data.message_type === "ticket_list") {
+        console.log("Aktuelle Ticketliste erhalten:", data.tickets);
+        // z.B. in einer HTML-Tabelle anzeigen
+      } else {
+        console.log("Unbekannte Nachricht:", data);
+      }
+    };
+
+    ws.onclose = function() {
+      console.log("WebSocket closed");
+    };
+  }
+
+  function assignTicket() {
+    const ticketId = document.getElementById("ticketIdInput").value;
+    const msg = {
+      message_type: "assign_ticket",
+      ticket_id: parseInt(ticketId, 10)
+    };
+    ws.send(JSON.stringify(msg));
+  }
+</script>
+
+<body>
+  <input id="clientIdInput" type="text" placeholder="Client ID" />
+  <button onclick="connect()">Connect</button>
+  <br>
+  <input id="ticketIdInput" type="text" placeholder="Ticket ID" />
+  <button onclick="assignTicket()">Ticket zuweisen</button>
+</body>
