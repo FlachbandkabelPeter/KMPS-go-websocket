@@ -65,7 +65,7 @@ Wählen Sie eine Aktion:
 ----------------------------------------
   `);
 
-  rl.question('Ihre Wahl: ', (choice) => {
+  rl.question('?', (choice) => {
     switch (choice.trim().toLowerCase()) {
       case '1':
         promptForTicketNumber('assign_ticket');
