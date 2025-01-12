@@ -1,11 +1,13 @@
 package main
 
 import (
-    "fmt"
     "bufio"
+    "encoding/json"
+    "fmt"
     "log"
     "net/http"
-    "encoding/json"
+    "os"
+    "sync/atomic"
 
     "github.com/gorilla/websocket"
 )
@@ -28,7 +30,7 @@ type ServerMessage struct {
 
 // Action repräsentiert eine Aktion, die an den TicketManager gesendet wird.
 type Action struct {
-    ActionType string // z.B. "create_ticket", "assign_ticket"
+    ActionType string 
     TicketID   int
     ClientID   string
 }
@@ -84,7 +86,35 @@ func (tm *TicketManager) Run() {
                         break
                     }
                 }
+            case "abandon_ticket":
+                // Zuordnung aufheben, wenn das Ticket von diesem Client gehalten wird
+                for i := range tm.tickets {
+                    if tm.tickets[i].ID == action.TicketID {
+                        if tm.tickets[i].AssignedTo == action.ClientID {
+                            tm.tickets[i].AssignedTo = ""
+                            log.Printf("Ticket %d freigegeben von Client '%s'\n", action.TicketID, action.ClientID)
+                            tm.broadcastTickets()
+                        } else {
+                            log.Printf("Ticket %d war nicht dem Client '%s' zugewiesen – keine Aktion.\n", 
+                                action.TicketID, action.ClientID)
+                        }
+                        break
+                    }
+                }
+
+            case "delete_ticket":
+                // Ticket wirklich aus der Liste entfernen
+                for i := range tm.tickets {
+                    if tm.tickets[i].ID == action.TicketID {
+                        // Ticket aus dem Slice entfernen
+                        tm.tickets = append(tm.tickets[:i], tm.tickets[i+1:]...)
+                        log.Printf("Ticket %d wurde gelöscht.\n", action.TicketID)
+                        tm.broadcastTickets()
+                        break
+                    }
+                }
             }
+        
 
         case conn := <-tm.registerChan:
             // Neuen Client registrieren
@@ -116,8 +146,6 @@ func (tm *TicketManager) broadcastTickets() {
     for conn := range tm.clients {
         if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
             log.Println("Fehler beim Broadcast:", err)
-            // Falls gewünscht: Client abmelden
-            tm.unregisterChan <- conn
         }
     }
 }
@@ -165,7 +193,7 @@ func wsHandler(tm *TicketManager) http.HandlerFunc {
         // Client registrieren
         tm.registerChan <- conn
 
-        // In einer separaten Routine Nachrichten vom Client empfangen
+        // Routine für Nachrichten vom Client empfangen
         go func() {
             defer func() {
                 // Bei Verlassen -> abmelden
@@ -187,15 +215,23 @@ func wsHandler(tm *TicketManager) http.HandlerFunc {
 
                 switch clientMsg.MessageType {
                 case "init":
-                    // Kann z.B. die ClientID speichern, 
-                    // derzeit aber optional, wenn wir's nicht zentral verwalten
-
                 case "assign_ticket":
-                    // Ticketzuweisung
                     tm.actionChan <- Action{
                         ActionType: "assign_ticket",
                         TicketID:   clientMsg.TicketID,
                         ClientID:   clientMsg.ClientID,
+                    }
+                case "abandon_ticket":
+                    tm.actionChan <- Action{
+                        ActionType: "abandon_ticket",
+                        TicketID:   clientMsg.TicketID,
+                        ClientID:   clientMsg.ClientID,
+                    }
+        
+                case "delete_ticket":
+                    tm.actionChan <- Action{
+                        ActionType: "delete_ticket",
+                        TicketID:   clientMsg.TicketID,
                     }
 
                 default:
@@ -217,8 +253,7 @@ func main() {
     // HTTP / WebSocket-Endpoints
     http.HandleFunc("/ws", wsHandler(tm))
 
-    // Optional: Statische Dateien (HTML/JS) serven
-    http.Handle("/", http.FileServer(http.Dir("client/web")))
+
 
     serverAddr := ":8080"
     fmt.Printf("Server startet auf %s ...\n", serverAddr)
